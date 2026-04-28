@@ -4,13 +4,13 @@ from datetime import datetime
 KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
-DESCUENTO_MIN=60
-PRECIO_MIN=30
+DESCUENTO_MIN=20
+PRECIO_MIN=10
 INTERVALO=60
 vistos=set()
 total=0
 alertas=0
-CATEGORIAS=[667048031,715370031,3277877031,3277875031,599367031,599379031,599368031,2589407031,3166781]
+CATEGORIAS=[667048031,715370031,3277877031,3277875031,599367031,599379031,599368031,2589407031,3166781,172282,13900791,599380031,228013031,1080670,3003492031]
 
 def log(m):
     t=datetime.now().strftime("%H:%M:%S")
@@ -69,9 +69,10 @@ def analizar_producto(asin):
     stats=prod.get("stats",{})
     precio_actual=stats.get("current",[None]*3)
     avg90=stats.get("avg",[None]*3)
+    max90=stats.get("max",[None]*3)
     if not precio_actual or not avg90:return
     pa=precio_actual[0] if precio_actual[0] else None
-    pb=avg90[0] if avg90[0] else None
+    pb=max90[0] if max90 and max90[0] else (avg90[0] if avg90[0] else None)
     if not pa or not pb or pa<=0 or pb<=0:return
     precio_ahora=pa/100
     precio_antes=pb/100
@@ -81,12 +82,12 @@ def analizar_producto(asin):
     alertas+=1
     titulo=str(prod.get("title","?"))[:60]
     url="https://www.amazon.es/dp/"+asin
-    m="ALERTA ERROR PRECIO\n"+titulo+"\nAhora:"+str(round(precio_ahora,2))+"e\nAntes:"+str(round(precio_antes,2))+"e\nBajada:-"+str(round(bajada))+"pct\n"+url
+    m="🚨 ALERTA ERROR PRECIO\n"+titulo+"\nAhora: "+str(round(precio_ahora,2))+"€\nAntes: "+str(round(precio_antes,2))+"€\nBajada: -"+str(round(bajada))+"%\n"+url
     log(m)
     tg(m)
 
 log("CAZADOR V5 INICIADO")
-tg("🚀 Cazador V5 iniciado y funcionando")
+tg("🚀 Cazador V5 iniciado")
 
 ciclo=0
 while True:
