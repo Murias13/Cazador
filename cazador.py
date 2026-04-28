@@ -23,25 +23,14 @@ def tokens():
     try:return str(requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft","?"))
     except:return "?"
 def buscar_categoria(cat_id,pagina=0):
-    params={
-        "key":KEEPA_KEY,
-        "domain":9,
-        "category":cat_id,
-        "range":pagina,
-    }
+    params={"key":KEEPA_KEY,"domain":9,"category":cat_id,"range":pagina}
     r=requests.get("https://api.keepa.com/bestsellers",params=params,timeout=20)
     if r.status_code==200:
         d=r.json()
         return d.get("asinList",[])
     return []
 def consultar_producto(asin):
-    params={
-        "key":KEEPA_KEY,
-        "domain":9,
-        "asin":asin,
-        "stats":90,
-        "history":1,
-    }
+    params={"key":KEEPA_KEY,"domain":9,"asin":asin,"stats":90,"history":1}
     r=requests.get("https://api.keepa.com/product",params=params,timeout=20)
     if r.status_code==200:
         d=r.json()
@@ -70,7 +59,30 @@ def analizar_producto(asin):
     alertas+=1
     titulo=str(prod.get("title","?"))[:60]
     url="https://www.amazon.es/dp/"+asin
-    m="ALERTA ERROR PRECIO\n"+titulo+"\nAhora:"+str(round(precio_ahora,2))+"e\nAntes:"+str(round(precio_antes,2))+"e\nBajada:-"+str(round(bajada))+"pct\n"+url
+    m="ALERTA\n"+titulo+"\nAhora:"+str(round(precio_ahora,2))+"e\nAntes:"+str(round(precio_antes,2))+"e\n-"+str(round(bajada))+"pct\n"+url
     log(m)
     tg(m)
-log("CAZADOR V5 - Por categorias​​​​​​​​​​​​​​​​
+log("CAZADOR V5 INICIADO")
+log("Tokens:"+tokens())
+tg("CAZADOR V5 ACTIVO")
+c=0
+while True:
+    c+=1
+    log("CICLO "+str(c)+" T:"+tokens()+" Anal:"+str(total)+" Alert:"+str(alertas))
+    for cat in CATEGORIAS:
+        for pag in range(3):
+            try:
+                asins=buscar_categoria(cat,pag)
+                if not asins:
+                    log("Cat "+str(cat)+" pag "+str(pag)+" vacia")
+                    break
+                log("Cat "+str(cat)+" pag "+str(pag)+":"+str(len(asins))+" ASINs")
+                for asin in asins:
+                    analizar_producto(asin)
+                    time.sleep(3.2)
+            except Exception as e:
+                log("Error:"+str(e))
+                time.sleep(15)
+                break
+    log("Esperando "+str(INTERVALO)+"s...")
+    time.sleep(INTERVALO)
