@@ -1,16 +1,14 @@
-import requests,time,json,os
+import requests,time,os
 from datetime import datetime
 
 KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
-DESCUENTO_MIN=20
-PRECIO_MIN=10
-INTERVALO=60
+DESCUENTO_MIN=30
+PRECIO_MIN=15
+INTERVALO=300
 vistos=set()
-total=0
 alertas=0
-CATEGORIAS=[667048031,715370031,3277877031,3277875031,599367031,599379031,599368031,2589407031,3166781,172282,13900791,599380031,228013031,1080670,3003492031]
 
 def log(m):
     t=datetime.now().strftime("%H:%M:%S")
@@ -24,55 +22,49 @@ def tg(m):
     except:pass
 
 def tokens():
-    try:return str(requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft","?"))
-    except:return "?"
+    try:return requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft",0)
+    except:return 0
 
-def buscar_categoria(cat_id,pagina=0):
+def buscar_productos():
     params={
         "key":KEEPA_KEY,
         "domain":9,
-        "category":cat_id,
-        "range":pagina,
+        "deltaPercent":DESCUENTO_MIN,
+        "current_MAX_NEW_PRICE":50000,
+        "current_MIN_NEW_PRICE":1500,
+        "sort":[["deltaPercent","desc"]],
     }
     try:
-        r=requests.get("https://api.keepa.com/bestsellers",params=params,timeout=20)
+        r=requests.post("https://api.keepa.com/query",params={"key":KEEPA_KEY,"domain":9},json=params,timeout=30)
+        log(f"ProductFinder status: {r.status_code}")
         if r.status_code==200:
             d=r.json()
+            log(f"Respuesta: {str(d)[:300]}")
             return d.get("asinList",[])
-    except:pass
+    except Exception as e:
+        log(f"Error buscar: {e}")
     return []
 
 def consultar_producto(asin):
-    params={
-        "key":KEEPA_KEY,
-        "domain":9,
-        "asin":asin,
-        "stats":90,
-        "history":1,
-    }
     try:
-        r=requests.get("https://api.keepa.com/product",params=params,timeout=20)
+        r=requests.get("https://api.keepa.com/product",params={"key":KEEPA_KEY,"domain":9,"asin":asin,"stats":90},timeout=20)
         if r.status_code==200:
-            d=r.json()
-            prods=d.get("products",[])
+            prods=r.json().get("products",[])
             if prods:return prods[0]
     except:pass
     return None
 
-def analizar_producto(asin):
-    global total,alertas
+def analizar(asin):
+    global alertas
     if asin in vistos:return
     vistos.add(asin)
     prod=consultar_producto(asin)
     if not prod:return
-    total+=1
     stats=prod.get("stats",{})
-    precio_actual=stats.get("current",[None]*3)
-    avg90=stats.get("avg",[None]*3)
-    max90=stats.get("max",[None]*3)
-    if not precio_actual or not avg90:return
-    pa=precio_actual[0] if precio_actual[0] else None
-    pb=max90[0] if max90 and max90[0] else (avg90[0] if avg90[0] else None)
+    pa=stats.get("current",[None]*3)
+    pb=stats.get("avg",[None]*3)
+    if not pa or not pb:return
+    pa=pa[0];pb=pb[0]
     if not pa or not pb or pa<=0 or pb<=0:return
     precio_ahora=pa/100
     precio_antes=pb/100
@@ -82,35 +74,36 @@ def analizar_producto(asin):
     alertas+=1
     titulo=str(prod.get("title","?"))[:60]
     url="https://www.amazon.es/dp/"+asin
-    m="🚨 ALERTA ERROR PRECIO\n"+titulo+"\nAhora: "+str(round(precio_ahora,2))+"€\nAntes: "+str(round(precio_antes,2))+"€\nBajada: -"+str(round(bajada))+"%\n"+url
+    m=f"🚨 CHOLLO\n{titulo}\nAhora: {round(precio_ahora,2)}€\nAntes: {round(precio_antes,2)}€\nBajada: -{round(bajada)}%\n{url}"
     log(m)
     tg(m)
 
 log("CAZADOR V5 INICIADO")
-tg("🚀 Cazador V5 iniciado")
+tg("🚀 Cazador iniciado")
 
 ciclo=0
 while True:
     try:
         ciclo+=1
-        log(f"=== CICLO {ciclo} | Tokens: {tokens()} | Vistos: {len(vistos)} | Alertas: {alertas} ===")
-        for cat_id in CATEGORIAS:
-            for pagina in range(3):
-                asins=buscar_categoria(cat_id,pagina)
-                if not asins:
-                    time.sleep(2)
-                    continue
-                log(f"Cat {cat_id} p{pagina}: {len(asins)} productos")
-                for asin in asins:
-                    analizar_producto(asin)
-                    time.sleep(0.5)
-                time.sleep(2)
-            time.sleep(3)
+        tk=tokens()
+        log(f"=== CICLO {ciclo} | Tokens: {tk} | Alertas: {alertas} ===")
+        if tk<50:
+            log("Pocos tokens, esperando 3 minutos...")
+            time.sleep(180)
+            continue
+        asins=buscar_productos()
+        log(f"Productos encontrados: {len(asins)}")
+        for asin in asins:
+            if tokens()<20:
+                log("Tokens bajos, parando ciclo")
+                break
+            analizar(asin)
+            time.sleep(1)
         log(f"Ciclo {ciclo} completado. Esperando {INTERVALO}s...")
         time.sleep(INTERVALO)
     except KeyboardInterrupt:
-        log("Cazador detenido por usuario")
+        log("Detenido")
         break
     except Exception as e:
-        log(f"ERROR en ciclo: {e}")
-        time.sleep(30)
+        log(f"ERROR: {e}")
+        time.sleep(60)
