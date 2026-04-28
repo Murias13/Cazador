@@ -5,7 +5,7 @@ TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
 DESCUENTO_MIN=60
 PRECIO_MIN=30
-INTERVALO=45
+INTERVALO=60
 vistos=set()
 total=0
 alertas=0
@@ -22,7 +22,7 @@ def tokens():
     try:return str(requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft","?"))
     except:return "?"
 def deals(p=0):
-    s={"page":p,"domainId":3,"priceTypes":[0],"deltaPercent":DESCUENTO_MIN,"deltaPercentInInterval":DESCUENTO_MIN,"interval":1,"isFilterEnabled":True,"isAvailable":1,"isAmazon":0,"isMerchant":0,"isNew":1,"isUsed":0}
+    s={"page":p,"domainId":3,"priceTypes":[0],"deltaPercent":DESCUENTO_MIN,"deltaPercentInInterval":DESCUENTO_MIN,"interval":720,"isFilterEnabled":True,"isAvailable":1,"isNew":1,"isUsed":0}
     r=requests.get("https://api.keepa.com/deal",params={"key":KEEPA_KEY,"selection":json.dumps(s)},timeout=20)
     if r.status_code==200:
         d=r.json()
@@ -50,14 +50,13 @@ def analizar(item):
     m="ALERTA ERROR PRECIO\n"+t+"\nAhora:"+str(round(pa,2))+"e\nAntes:"+str(round(pb,2))+"e\nBajada:-"+str(round(b))+"pct\n"+u
     log(m)
     tg(m)
-log("CAZADOR V2 INICIADO")
+log("CAZADOR V3 INICIADO")
 log("Tokens:"+tokens())
-log("Descuento:"+str(DESCUENTO_MIN)+"% PrecioMin:"+str(PRECIO_MIN)+"e Intervalo:"+str(INTERVALO)+"s")
-tg("CAZADOR V2 ACTIVO - Descuento:"+str(DESCUENTO_MIN)+"% PrecioMin:"+str(PRECIO_MIN)+"e")
+tg("CAZADOR V3 ACTIVO")
 c=0
 while True:
     c+=1
-    log("=== CICLO #"+str(c)+" Tokens:"+tokens()+" Analizados:"+str(total)+" Alertas:"+str(alertas)+" ===")
+    log("=== CICLO #"+str(c)+" T:"+tokens()+" Anal:"+str(total)+" Alert:"+str(alertas)+" ===")
     for p in range(10):
         try:
             d=deals(p)
