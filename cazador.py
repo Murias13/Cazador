@@ -22,7 +22,7 @@ def tokens():
     try:return str(requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft","?"))
     except:return "?"
 def deals(p=0):
-    s={"page":p,"domainId":3,"priceTypes":[0],"deltaPercent":DESCUENTO_MIN,"deltaPercentInInterval":DESCUENTO_MIN,"interval":1,"isFilterEnabled":True,"isAvailable":1,"isAmazon":1,"isMerchant":0,"isNew":1,"isUsed":0}
+    s={"page":p,"domainId":3,"priceTypes":[0],"deltaPercent":DESCUENTO_MIN,"deltaPercentInInterval":DESCUENTO_MIN,"interval":1,"isFilterEnabled":True,"isAvailable":1,"isAmazon":0,"isMerchant":0,"isNew":1,"isUsed":0}
     r=requests.get("https://api.keepa.com/deal",params={"key":KEEPA_KEY,"selection":json.dumps(s)},timeout=20)
     if r.status_code==200:
         d=r.json()
