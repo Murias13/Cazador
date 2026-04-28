@@ -5,10 +5,11 @@ TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
 DESCUENTO_MIN=60
 PRECIO_MIN=30
-INTERVALO=45
+INTERVALO=60
 vistos=set()
 total=0
 alertas=0
+CATEGORIAS=[667048031,715370031,3277877031,3277875031,599367031,599379031,599368031,2589407031,3166781]
 def log(m):
     t=datetime.now().strftime("%H:%M:%S")
     l="["+t+"] "+m
@@ -21,55 +22,55 @@ def tg(m):
 def tokens():
     try:return str(requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft","?"))
     except:return "?"
-def deals(p=0):
-    s={"page":p,"domainId":9,"priceTypes":[0],"deltaPercent":DESCUENTO_MIN,"deltaPercentInInterval":DESCUENTO_MIN,"interval":720,"isFilterEnabled":True,"isAvailable":1,"isNew":1,"isUsed":0}
-    r=requests.get("https://api.keepa.com/deal",params={"key":KEEPA_KEY,"selection":json.dumps(s)},timeout=20)
+def buscar_categoria(cat_id,pagina=0):
+    params={
+        "key":KEEPA_KEY,
+        "domain":9,
+        "category":cat_id,
+        "range":pagina,
+    }
+    r=requests.get("https://api.keepa.com/bestsellers",params=params,timeout=20)
     if r.status_code==200:
         d=r.json()
-        if "deals" in d:return d
-    raise Exception("HTTP "+str(r.status_code))
-def analizar(item):
+        return d.get("asinList",[])
+    return []
+def consultar_producto(asin):
+    params={
+        "key":KEEPA_KEY,
+        "domain":9,
+        "asin":asin,
+        "stats":90,
+        "history":1,
+    }
+    r=requests.get("https://api.keepa.com/product",params=params,timeout=20)
+    if r.status_code==200:
+        d=r.json()
+        prods=d.get("products",[])
+        if prods:return prods[0]
+    return None
+def analizar_producto(asin):
     global total,alertas
-    asin=item.get("asin")
-    if not asin or asin in vistos:return
-    cur=item.get("current") or []
-    avg=item.get("avg90") or item.get("avg180") or []
-    cp=cur[0] if cur else None
-    ap=avg[0] if avg else None
-    if not cp or not ap or cp<=0 or ap<=0:return
-    pa=cp/100
-    pb=ap/100
-    if pa<PRECIO_MIN:return
-    b=(1-cp/ap)*100
-    total+=1
-    if b<DESCUENTO_MIN:return
+    if asin in vistos:return
     vistos.add(asin)
+    prod=consultar_producto(asin)
+    if not prod:return
+    total+=1
+    stats=prod.get("stats",{})
+    precio_actual=stats.get("current",[None]*3)
+    avg90=stats.get("avg",[None]*3)
+    if not precio_actual or not avg90:return
+    pa=precio_actual[0] if precio_actual[0] else None
+    pb=avg90[0] if avg90[0] else None
+    if not pa or not pb or pa<=0 or pb<=0:return
+    precio_ahora=pa/100
+    precio_antes=pb/100
+    if precio_ahora<PRECIO_MIN:return
+    bajada=(1-pa/pb)*100
+    if bajada<DESCUENTO_MIN:return
     alertas+=1
-    t=str(item.get("title",asin))[:60]
-    u="https://www.amazon.es/dp/"+asin
-    m="ALERTA ERROR PRECIO\n"+t+"\nAhora:"+str(round(pa,2))+"e\nAntes:"+str(round(pb,2))+"e\nBajada:-"+str(round(b))+"pct\n"+u
+    titulo=str(prod.get("title","?"))[:60]
+    url="https://www.amazon.es/dp/"+asin
+    m="ALERTA ERROR PRECIO\n"+titulo+"\nAhora:"+str(round(precio_ahora,2))+"e\nAntes:"+str(round(precio_antes,2))+"e\nBajada:-"+str(round(bajada))+"pct\n"+url
     log(m)
     tg(m)
-log("CAZADOR V4 INICIADO - Amazon.es CORRECTO")
-log("Tokens:"+tokens())
-tg("CAZADOR V4 ACTIVO - Amazon.es dominio 9 correcto")
-c=0
-while True:
-    c+=1
-    log("=== CICLO #"+str(c)+" T:"+tokens()+" Anal:"+str(total)+" Alert:"+str(alertas)+" ===")
-    for p in range(10):
-        try:
-            d=deals(p)
-            items=d.get("deals",{}).get("items",[])
-            if not items:
-                log("Pag "+str(p)+" vacia")
-                break
-            log("Pag "+str(p)+":"+str(len(items))+" productos")
-            for i in items:analizar(i)
-            time.sleep(3.2)
-        except Exception as e:
-            log("Error:"+str(e))
-            time.sleep(15)
-            break
-    log("Esperando "+str(INTERVALO)+"s...")
-    time.sleep(INTERVALO)
+log("CAZADOR V5 - Por categorias​​​​​​​​​​​​​​​​
