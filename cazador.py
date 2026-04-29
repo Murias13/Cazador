@@ -1,17 +1,12 @@
-import time,os,requests
+import requests,time,os,json
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
 
+KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
 INTERVALO=120
 vistos=set()
 alertas=0
-
-URL="https://keepa.com/#!deals/%7B%22page%22%3A0%2C%22domainId%22%3A%229%22%2C%22excludeCategories%22%3A%5B%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B818936031%2C599382031%2C1661649031%2C599373031%2C599364031%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%5D%2C%22includeCategories%22%3A%5B%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%5D%2C%22priceTypes%22%3A%5B0%5D%2C%22deltaPercentRange%22%3A%5B70%2C2147483647%5D%2C%22hasAmazonOffer%22%3Atrue%2C%22isOutOfStock%22%3Afalse%2C%22filterErotic%22%3Atrue%2C%22singleVariation%22%3Atrue%2C%22sortType%22%3A4%2C%22dateRange%22%3A%220%22%2C%22perPage%22%3A150%7D"
 
 def log(m):
     t=datetime.now().strftime("%H:%M:%S")
@@ -24,69 +19,117 @@ def tg(m):
     try:requests.post("https://api.telegram.org/bot"+TG_BOT+"/sendMessage",json={"chat_id":TG_CHAT,"text":m},timeout=10)
     except:pass
 
-def crear_driver():
-    opts=Options()
-    opts.add_argument("--headless")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
-    opts.binary_location="/snap/bin/chromium"
-    service=Service("/usr/bin/chromedriver")
-    return webdriver.Chrome(service=service,options=opts)
+def tokens():
+    try:return requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft",0)
+    except:return 0
 
-def raspar():
-    driver=None
+def buscar_deals():
+    selection={
+        "page":0,
+        "domainId":"9",
+        "excludeCategories":[818936031,599382031,1661649031,599373031,599364031],
+        "includeCategories":[],
+        "priceTypes":[0],
+        "deltaRange":[0,2147483647],
+        "deltaPercentRange":[70,2147483647],
+        "salesRankRange":[-1,-1],
+        "currentRange":[0,2147483647],
+        "minRating":-1,
+        "isLowest":False,
+        "isLowest90":False,
+        "isLowestOffer":False,
+        "isOutOfStock":False,
+        "titleSearch":"",
+        "isRangeEnabled":True,
+        "isFilterEnabled":False,
+        "filterErotic":True,
+        "singleVariation":True,
+        "hasReviews":False,
+        "isPrimeExclusive":False,
+        "mustHaveAmazonOffer":False,
+        "mustNotHaveAmazonOffer":False,
+        "sortType":4,
+        "dateRange":"0",
+        "warehouseConditions":[2,3,4,5],
+        "hasAmazonOffer":True
+    }
     try:
-        driver=crear_driver()
-        log("Abriendo Keepa...")
-        driver.get(URL)
-        log("Esperando que cargue la página...")
-        time.sleep(20)
-        html=driver.page_source
-        log(f"HTML recibido: {len(html)} chars")
-        productos=driver.find_elements(By.CSS_SELECTOR,"div.dealItem")
-        log(f"Productos encontrados: {len(productos)}")
-        resultados=[]
-        for p in productos:
-            try:
-                asin=p.get_attribute("data-asin") or ""
-                titulo=p.find_element(By.CSS_SELECTOR,"div.dealTitle").text.strip()[:60]
-                descuento=p.find_element(By.CSS_SELECTOR,"div.dealDelta").text.strip()
-                precio=p.find_element(By.CSS_SELECTOR,"div.dealCurrent").text.strip()
-                if asin:
-                    resultados.append({"asin":asin,"titulo":titulo,"descuento":descuento,"precio":precio})
-            except:pass
-        return resultados
+        params={
+            "key":KEEPA_KEY,
+            "selection":json.dumps(selection)
+        }
+        r=requests.get("https://api.keepa.com/deal",params=params,timeout=30)
+        log(f"Status: {r.status_code}")
+        if r.status_code==200:
+            d=r.json()
+            log(f"Respuesta: {str(d)[:200]}")
+            dr=d.get("deals",{}).get("dr",[])
+            log(f"Deals: {len(dr)}")
+            return dr
+        else:
+            log(f"Error respuesta: {r.text[:200]}")
     except Exception as e:
-        log(f"Error selenium: {e}")
-        return []
-    finally:
-        if driver:driver.quit()
+        log(f"Error: {e}")
+    return []
 
-log("CAZADOR SELENIUM INICIADO")
-tg("🚀 Cazador Selenium iniciado")
+def precio_inflado(deal):
+    avg90=deal.get("avg90",0)
+    avg180=deal.get("avg180",0)
+    current=deal.get("current",0)
+    if not avg90 or not avg180 or not current:return True
+    if avg90<=0 or avg180<=0:return True
+    diferencia=abs(avg90-avg180)/avg180*100
+    if diferencia>50:return True
+    if current>=avg90:return True
+    return False
+
+def procesar(deal):
+    global alertas
+    try:
+        asin=deal.get("asin","")
+        if not asin or asin in vistos:return
+        vistos.add(asin)
+        if precio_inflado(deal):return
+        titulo=str(deal.get("title","?"))[:60]
+        pa=deal.get("current",0)
+        pb=deal.get("avg90",0)
+        if not pa or not pb or pa<=0 or pb<=0:return
+        precio_ahora=pa/100
+        precio_antes=pb/100
+        bajada=round((1-pa/pb)*100)
+        if bajada<70:return
+        alertas+=1
+        url="https://www.amazon.es/dp/"+asin
+        m=(f"🚨 CHOLLO REAL -{bajada}%\n"
+           f"📦 {titulo}\n"
+           f"💰 Ahora: {round(precio_ahora,2)}€\n"
+           f"📊 Antes: {round(precio_antes,2)}€\n"
+           f"🔗 {url}")
+        log(m)
+        tg(m)
+    except Exception as e:
+        log(f"Error procesando: {e}")
+
+log("CAZADOR V5 INICIADO")
+tg("🚀 Cazador iniciado")
 
 ciclo=0
 while True:
     try:
         ciclo+=1
-        log(f"=== CICLO {ciclo} | Alertas: {alertas} ===")
-        productos=raspar()
+        tk=tokens()
+        log(f"=== CICLO {ciclo} | Tokens: {tk} | Alertas: {alertas} ===")
+        if tk<10:
+            log("Pocos tokens, esperando...")
+            time.sleep(180)
+            continue
+        deals=buscar_deals()
         nuevos=0
-        for p in productos:
-            asin=p["asin"]
-            if asin in vistos:continue
-            vistos.add(asin)
-            nuevos+=1
-            alertas+=1
-            url="https://www.amazon.es/dp/"+asin
-            m=(f"🚨 CHOLLO {p['descuento']}\n"
-               f"📦 {p['titulo']}\n"
-               f"💰 {p['precio']}\n"
-               f"🔗 {url}")
-            log(m)
-            tg(m)
+        for deal in deals:
+            if deal.get("asin","") not in vistos:
+                nuevos+=1
+                procesar(deal)
+                time.sleep(0.3)
         log(f"Nuevos: {nuevos} | Esperando {INTERVALO}s...")
         time.sleep(INTERVALO)
     except KeyboardInterrupt:
@@ -95,4 +138,3 @@ while True:
     except Exception as e:
         log(f"ERROR: {e}")
         time.sleep(60)
-
