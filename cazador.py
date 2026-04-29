@@ -31,7 +31,7 @@ def buscar_deals():
         "includeCategories":[],
         "priceTypes":[0],
         "deltaRange":[0,2147483647],
-        "deltaPercentRange":[70,2147483647],
+        "deltaPercentRange":[10,2147483647],
         "salesRankRange":[-1,-1],
         "currentRange":[0,2147483647],
         "minRating":-1,
@@ -62,12 +62,11 @@ def buscar_deals():
         log(f"Status: {r.status_code}")
         if r.status_code==200:
             d=r.json()
-            log(f"Respuesta: {str(d)[:200]}")
             dr=d.get("deals",{}).get("dr",[])
             log(f"Deals: {len(dr)}")
             return dr
         else:
-            log(f"Error respuesta: {r.text[:200]}")
+            log(f"Error: {r.text[:200]}")
     except Exception as e:
         log(f"Error: {e}")
     return []
@@ -89,7 +88,9 @@ def procesar(deal):
         asin=deal.get("asin","")
         if not asin or asin in vistos:return
         vistos.add(asin)
-        if precio_inflado(deal):return
+        if precio_inflado(deal):
+            log(f"Inflado descartado: {asin}")
+            return
         titulo=str(deal.get("title","?"))[:60]
         pa=deal.get("current",0)
         pb=deal.get("avg90",0)
@@ -97,10 +98,10 @@ def procesar(deal):
         precio_ahora=pa/100
         precio_antes=pb/100
         bajada=round((1-pa/pb)*100)
-        if bajada<70:return
+        if bajada<10:return
         alertas+=1
         url="https://www.amazon.es/dp/"+asin
-        m=(f"🚨 CHOLLO REAL -{bajada}%\n"
+        m=(f"🚨 CHOLLO -{bajada}%\n"
            f"📦 {titulo}\n"
            f"💰 Ahora: {round(precio_ahora,2)}€\n"
            f"📊 Antes: {round(precio_antes,2)}€\n"
@@ -110,8 +111,8 @@ def procesar(deal):
     except Exception as e:
         log(f"Error procesando: {e}")
 
-log("CAZADOR V5 INICIADO")
-tg("🚀 Cazador iniciado")
+log("CAZADOR V5 INICIADO - PRUEBA 10%")
+tg("🚀 Cazador iniciado - Prueba 10%")
 
 ciclo=0
 while True:
