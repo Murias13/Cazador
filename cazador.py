@@ -1,12 +1,16 @@
-import requests,time,os
+import time,os,requests
 from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
-KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
 INTERVALO=120
 vistos=set()
 alertas=0
+
+URL="https://keepa.com/#!deals/%7B%22page%22%3A0%2C%22domainId%22%3A%229%22%2C%22excludeCategories%22%3A%5B%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B818936031%2C599382031%2C1661649031%2C599373031%2C599364031%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%5D%2C%22includeCategories%22%3A%5B%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%2C%5B%5D%5D%2C%22priceTypes%22%3A%5B0%5D%2C%22deltaPercentRange%22%3A%5B70%2C2147483647%5D%2C%22hasAmazonOffer%22%3Atrue%2C%22isOutOfStock%22%3Afalse%2C%22filterErotic%22%3Atrue%2C%22singleVariation%22%3Atrue%2C%22sortType%22%3A4%2C%22dateRange%22%3A%220%22%2C%22perPage%22%3A150%7D"
 
 def log(m):
     t=datetime.now().strftime("%H:%M:%S")
@@ -19,150 +23,66 @@ def tg(m):
     try:requests.post("https://api.telegram.org/bot"+TG_BOT+"/sendMessage",json={"chat_id":TG_CHAT,"text":m},timeout=10)
     except:pass
 
-def tokens():
-    try:return requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft",0)
-    except:return 0
+def crear_driver():
+    opts=Options()
+    opts.add_argument("--headless")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1920,1080")
+    opts.binary_location="/snap/bin/chromium"
+    return webdriver.Chrome(options=opts)
 
-def buscar_deals():
-    params={
-        "key":KEEPA_KEY,
-        "domain":9,
-        "page":0,
-        "dealCondition":0,
-        "priceTypes":0,
-        "deltaPercentRange":"70,2147483647",
-        "hasAmazonOffer":1,
-        "isOutOfStock":0,
-        "filterErotic":1,
-        "singleVariation":1,
-        "sortType":0,
-        "perPage":150,
-        "minRating":10,
-    }
+def raspar():
+    driver=None
     try:
-        r=requests.get("https://api.keepa.com/deal",params=params,timeout=30)
-        log(f"Deal status: {r.status_code}")
-        if r.status_code==200:
-            d=r.json()
-            dr=d.get("deals",{}).get("dr",[])
-            log(f"Deals recibidos: {len(dr)}")
-            return dr
+        driver=crear_driver()
+        log("Abriendo Keepa...")
+        driver.get(URL)
+        time.sleep(15)
+        productos=driver.find_elements(By.CSS_SELECTOR,"div.dealItem")
+        log(f"Productos encontrados: {len(productos)}")
+        resultados=[]
+        for p in productos:
+            try:
+                asin=p.get_attribute("data-asin") or ""
+                titulo=p.find_element(By.CSS_SELECTOR,"div.dealTitle").text.strip()[:60]
+                descuento=p.find_element(By.CSS_SELECTOR,"div.dealDelta").text.strip()
+                precio=p.find_element(By.CSS_SELECTOR,"div.dealCurrent").text.strip()
+                if asin:
+                    resultados.append({"asin":asin,"titulo":titulo,"descuento":descuento,"precio":precio})
+            except:pass
+        return resultados
     except Exception as e:
-        log(f"Error: {e}")
-    return []
+        log(f"Error selenium: {e}")
+        return []
+    finally:
+        if driver:driver.quit()
 
-def precio_inflado(deal):
-    # Comprueba si el precio anterior es real
-    avg90=deal.get("avg90",0)
-    avg180=deal.get("avg180",0)
-    current=deal.get("current",0)
-    if not avg90 or not avg180 or not current:return True
-    # Si la media de 90 y 180 dias es similar el precio es real
-    if avg90<=0 or avg180<=0:return True
-    # Si la media de 90 dias es muy diferente a la de 180 dias es inflado
-    diferencia=abs(avg90-avg180)/avg180*100
-    if diferencia>50:return True
-    # Si el precio actual es mayor que la media es inflado
-    if current>=avg90:return True
-    return False
-
-def es_reciente(deal):
-    # Solo chollos de las ultimas 24 horas
-    delta_time=deal.get("deltaTime",0)
-    if not delta_time:return False
-    horas=delta_time/3600000
-    return horas<=24
-
-def tiene_historial(deal):
-    # Minimo 90 dias de historial
-    avg90=deal.get("avg90",0)
-    return avg90 and avg90>0
-
-def buen_rango_ventas(deal):
-    # Que tenga rango de ventas razonable (que se venda)
-    rank=deal.get("salesRank",0)
-    if not rank or rank<=0:return False
-    return rank<=500000
-
-def procesar(deal):
-    global alertas
-    try:
-        asin=deal.get("asin","")
-        if not asin or asin in vistos:return
-        vistos.add(asin)
-
-        # Filtro anti-inflado
-        if precio_inflado(deal):
-            log(f"Precio inflado descartado: {asin}")
-            return
-
-        # Filtro reciente
-        if not es_reciente(deal):
-            log(f"No reciente descartado: {asin}")
-            return
-
-        # Filtro historial
-        if not tiene_historial(deal):
-            log(f"Sin historial descartado: {asin}")
-            return
-
-        # Filtro rango ventas
-        if not buen_rango_ventas(deal):
-            log(f"Mal rango ventas descartado: {asin}")
-            return
-
-        titulo=str(deal.get("title","?"))[:60]
-        pa=deal.get("current",0)
-        pb=deal.get("avg90",0)
-        if not pa or not pb or pa<=0 or pb<=0:return
-        precio_ahora=pa/100
-        precio_antes=pb/100
-        bajada=round((1-pa/pb)*100)
-        if bajada<70:return
-
-        reseñas=deal.get("totalReviews",0)
-        if not reseñas or reseñas<10:
-            log(f"Pocas reseñas descartado: {asin}")
-            return
-
-        rank=deal.get("salesRank",0)
-        alertas+=1
-        url="https://www.amazon.es/dp/"+asin
-        m=(f"🚨 CHOLLO REAL -{bajada}%\n"
-           f"📦 {titulo}\n"
-           f"💰 Ahora: {round(precio_ahora,2)}€\n"
-           f"📊 Antes: {round(precio_antes,2)}€\n"
-           f"⭐ Reseñas: {reseñas}\n"
-           f"📈 Ranking: {rank}\n"
-           f"🔗 {url}")
-        log(m)
-        tg(m)
-    except Exception as e:
-        log(f"Error procesando: {e}")
-
-log("CAZADOR V5 INICIADO - MODO ANTI-INFLADO")
-tg("🚀 Cazador iniciado - Chollos reales 70%+")
+log("CAZADOR SELENIUM INICIADO")
+tg("🚀 Cazador Selenium iniciado")
 
 ciclo=0
 while True:
     try:
         ciclo+=1
-        tk=tokens()
-        log(f"=== CICLO {ciclo} | Tokens: {tk} | Alertas: {alertas} ===")
-        if tk<10:
-            log("Pocos tokens, esperando 3 min...")
-            time.sleep(180)
-            continue
-        deals=buscar_deals()
+        log(f"=== CICLO {ciclo} | Alertas: {alertas} ===")
+        productos=raspar()
         nuevos=0
-        for deal in deals:
-            asin=deal.get("asin","")
-            if asin not in vistos:
-                nuevos+=1
-                procesar(deal)
-                time.sleep(0.3)
-        log(f"Nuevos esta ronda: {nuevos}")
-        log(f"Esperando {INTERVALO}s...")
+        for p in productos:
+            asin=p["asin"]
+            if asin in vistos:continue
+            vistos.add(asin)
+            nuevos+=1
+            alertas+=1
+            url="https://www.amazon.es/dp/"+asin
+            m=(f"🚨 CHOLLO {p['descuento']}\n"
+               f"📦 {p['titulo']}\n"
+               f"💰 {p['precio']}\n"
+               f"🔗 {url}")
+            log(m)
+            tg(m)
+        log(f"Nuevos: {nuevos} | Esperando {INTERVALO}s...")
         time.sleep(INTERVALO)
     except KeyboardInterrupt:
         log("Detenido")
