@@ -2,6 +2,7 @@ import time,os,requests
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 TG_BOT=os.environ.get("TG_BOT","")
@@ -31,7 +32,8 @@ def crear_driver():
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1920,1080")
     opts.binary_location="/snap/bin/chromium"
-    return webdriver.Chrome(options=opts)
+    service=Service("/usr/bin/chromedriver")
+    return webdriver.Chrome(service=service,options=opts)
 
 def raspar():
     driver=None
@@ -39,7 +41,10 @@ def raspar():
         driver=crear_driver()
         log("Abriendo Keepa...")
         driver.get(URL)
-        time.sleep(15)
+        log("Esperando que cargue la página...")
+        time.sleep(20)
+        html=driver.page_source
+        log(f"HTML recibido: {len(html)} chars")
         productos=driver.find_elements(By.CSS_SELECTOR,"div.dealItem")
         log(f"Productos encontrados: {len(productos)}")
         resultados=[]
@@ -90,3 +95,4 @@ while True:
     except Exception as e:
         log(f"ERROR: {e}")
         time.sleep(60)
+
