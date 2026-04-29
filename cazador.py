@@ -1,3 +1,4 @@
+pkill -f cazador.py && cat > /root/cazador.py << 'ENDOFFILE'
 import requests,time,os,json
 from datetime import datetime
 
@@ -20,42 +21,11 @@ def tg(m):
     except:pass
 
 def buscar_deals(pagina=0):
-    selection={
-        "page":pagina,
-        "domainId":"9",
-        "excludeCategories":[818936031,599382031,1661649031,599373031,599364031],
-        "includeCategories":[],
-        "priceTypes":[0],
-        "deltaRange":[0,2147483647],
-        "deltaPercentRange":[DESCUENTO,2147483647],
-        "salesRankRange":[-1,-1],
-        "currentRange":[0,2147483647],
-        "minRating":-1,
-        "isLowest":False,
-        "isLowest90":False,
-        "isLowestOffer":False,
-        "isOutOfStock":False,
-        "titleSearch":"",
-        "isRangeEnabled":True,
-        "isFilterEnabled":False,
-        "filterErotic":True,
-        "singleVariation":True,
-        "hasReviews":False,
-        "isPrimeExclusive":False,
-        "mustHaveAmazonOffer":False,
-        "mustNotHaveAmazonOffer":False,
-        "sortType":4,
-        "dateRange":"0",
-        "warehouseConditions":[2,3,4,5],
-        "hasAmazonOffer":True
-    }
+    selection={"page":pagina,"domainId":"9","excludeCategories":[818936031,599382031,1661649031,599373031,599364031],"includeCategories":[],"priceTypes":[0],"deltaRange":[0,2147483647],"deltaPercentRange":[DESCUENTO,2147483647],"salesRankRange":[-1,-1],"currentRange":[0,2147483647],"minRating":-1,"isLowest":False,"isLowest90":False,"isLowestOffer":False,"isOutOfStock":False,"titleSearch":"","isRangeEnabled":True,"isFilterEnabled":False,"filterErotic":True,"singleVariation":True,"hasReviews":False,"isPrimeExclusive":False,"mustHaveAmazonOffer":False,"mustNotHaveAmazonOffer":False,"sortType":4,"dateRange":"0","warehouseConditions":[2,3,4,5],"hasAmazonOffer":True}
     try:
-        r=requests.get("https://api.keepa.com/deal",
-            params={"key":KEEPA_KEY,"selection":json.dumps(selection)},
-            timeout=30)
+        r=requests.get("https://api.keepa.com/deal",params={"key":KEEPA_KEY,"selection":json.dumps(selection)},timeout=30)
         if r.status_code==200:
-            d=r.json()
-            return d.get("deals",{}).get("dr",[])
+            return r.json().get("deals",{}).get("dr",[])
     except Exception as e:
         log(f"Error: {e}")
     return []
@@ -87,32 +57,37 @@ def procesar(deal):
         if bajada<DESCUENTO:return False
         alertas+=1
         url="https://www.amazon.es/dp/"+asin
-        m=(f"🚨 CHOLLO -{bajada}%\n"
-           f"📦 {titulo}\n"
-           f"💰 Ahora: {round(precio_ahora,2)}€\n"
-           f"📊 Antes: {round(precio_antes,2)}€\n"
-           f"🔗 {url}")
+        m=f"CHOLLO -{bajada}%\n{titulo}\nAhora: {round(precio_ahora,2)}e\nAntes: {round(precio_antes,2)}e\n{url}"
         log(m)
         tg(m)
         return True
     except:return False
 
-log(f"CAZADOR INICIADO - Descuento: {DESCUENTO}%+")
-tg(f"🚀 Cazador iniciado - Buscando {DESCUENTO}%+ de descuento")
+log(f"CAZADOR INICIADO - {DESCUENTO}%+")
+tg(f"Cazador iniciado - {DESCUENTO}%+")
 
 ciclo=0
 while True:
     try:
         ciclo+=1
         pagina=0
-        total_analizados=0
-        nuevos_ciclo=0
+        analizados=0
         while True:
             deals=buscar_deals(pagina)
             if not deals:break
             for deal in deals:
-                asin=deal.get("asin","")
-                if asin not in vistos:
-                    total_analizados+=1​​​​​​​​​​​​​​​​
-
-
+                if deal.get("asin","") not in vistos:
+                    analizados+=1
+                    procesar(deal)
+            if len(deals)<150:break
+            pagina+=1
+            time.sleep(1)
+        log(f"Ciclo {ciclo} | Paginas: {pagina+1} | Analizados: {analizados} | Alertas: {alertas}")
+        time.sleep(5)
+    except KeyboardInterrupt:
+        log("Detenido")
+        break
+    except Exception as e:
+        log(f"ERROR: {e}")
+        time.sleep(10)
+ENDOFFILE
