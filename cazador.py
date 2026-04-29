@@ -4,7 +4,7 @@ from datetime import datetime
 KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
-INTERVALO=120
+INTERVALO=5
 vistos=set()
 alertas=0
 
@@ -59,14 +59,12 @@ def buscar_deals():
             "selection":json.dumps(selection)
         }
         r=requests.get("https://api.keepa.com/deal",params=params,timeout=30)
-        log(f"Status: {r.status_code}")
         if r.status_code==200:
             d=r.json()
             dr=d.get("deals",{}).get("dr",[])
-            log(f"Deals: {len(dr)}")
             return dr
         else:
-            log(f"Error: {r.text[:200]}")
+            log(f"Error: {r.status_code}")
     except Exception as e:
         log(f"Error: {e}")
     return []
@@ -88,9 +86,7 @@ def procesar(deal):
         asin=deal.get("asin","")
         if not asin or asin in vistos:return
         vistos.add(asin)
-        if precio_inflado(deal):
-            log(f"Inflado descartado: {asin}")
-            return
+        if precio_inflado(deal):return
         titulo=str(deal.get("title","?"))[:60]
         pa=deal.get("current",0)
         pb=deal.get("avg90",0)
@@ -109,33 +105,28 @@ def procesar(deal):
         log(m)
         tg(m)
     except Exception as e:
-        log(f"Error procesando: {e}")
+        log(f"Error: {e}")
 
-log("CAZADOR V5 INICIADO - PRUEBA 10%")
-tg("🚀 Cazador iniciado - Prueba 10%")
+log("CAZADOR INICIADO - 5 segundos")
+tg("🚀 Cazador iniciado - Modo ultrarapido")
 
 ciclo=0
 while True:
     try:
         ciclo+=1
-        tk=tokens()
-        log(f"=== CICLO {ciclo} | Tokens: {tk} | Alertas: {alertas} ===")
-        if tk<10:
-            log("Pocos tokens, esperando...")
-            time.sleep(180)
-            continue
         deals=buscar_deals()
         nuevos=0
         for deal in deals:
             if deal.get("asin","") not in vistos:
                 nuevos+=1
                 procesar(deal)
-                time.sleep(0.3)
-        log(f"Nuevos: {nuevos} | Esperando {INTERVALO}s...")
+        if nuevos>0:
+            log(f"Ciclo {ciclo} | Nuevos: {nuevos} | Alertas: {alertas}")
         time.sleep(INTERVALO)
     except KeyboardInterrupt:
         log("Detenido")
         break
     except Exception as e:
         log(f"ERROR: {e}")
-        time.sleep(60)
+        time.sleep(10)
+
