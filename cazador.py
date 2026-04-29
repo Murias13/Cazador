@@ -4,9 +4,7 @@ from datetime import datetime
 KEEPA_KEY=os.environ.get("KEEPA_KEY","")
 TG_BOT=os.environ.get("TG_BOT","")
 TG_CHAT=os.environ.get("TG_CHAT","")
-DESCUENTO_MIN=30
-PRECIO_MIN=15
-INTERVALO=300
+INTERVALO=120
 vistos=set()
 alertas=0
 
@@ -25,61 +23,125 @@ def tokens():
     try:return requests.get("https://api.keepa.com/token",params={"key":KEEPA_KEY},timeout=10).json().get("tokensLeft",0)
     except:return 0
 
-def buscar_productos():
+def buscar_deals():
     params={
         "key":KEEPA_KEY,
         "domain":9,
-        "deltaPercent":DESCUENTO_MIN,
-        "current_MAX_NEW_PRICE":50000,
-        "current_MIN_NEW_PRICE":1500,
-        "sort":[["deltaPercent","desc"]],
+        "page":0,
+        "dealCondition":0,
+        "priceTypes":0,
+        "deltaPercentRange":"70,2147483647",
+        "hasAmazonOffer":1,
+        "isOutOfStock":0,
+        "filterErotic":1,
+        "singleVariation":1,
+        "sortType":0,
+        "perPage":150,
+        "minRating":10,
     }
     try:
-        r=requests.post("https://api.keepa.com/query",params={"key":KEEPA_KEY,"domain":9},json=params,timeout=30)
-        log(f"ProductFinder status: {r.status_code}")
+        r=requests.get("https://api.keepa.com/deal",params=params,timeout=30)
+        log(f"Deal status: {r.status_code}")
         if r.status_code==200:
             d=r.json()
-            log(f"Respuesta: {str(d)[:300]}")
-            return d.get("asinList",[])
+            dr=d.get("deals",{}).get("dr",[])
+            log(f"Deals recibidos: {len(dr)}")
+            return dr
     except Exception as e:
-        log(f"Error buscar: {e}")
+        log(f"Error: {e}")
     return []
 
-def consultar_producto(asin):
-    try:
-        r=requests.get("https://api.keepa.com/product",params={"key":KEEPA_KEY,"domain":9,"asin":asin,"stats":90},timeout=20)
-        if r.status_code==200:
-            prods=r.json().get("products",[])
-            if prods:return prods[0]
-    except:pass
-    return None
+def precio_inflado(deal):
+    # Comprueba si el precio anterior es real
+    avg90=deal.get("avg90",0)
+    avg180=deal.get("avg180",0)
+    current=deal.get("current",0)
+    if not avg90 or not avg180 or not current:return True
+    # Si la media de 90 y 180 dias es similar el precio es real
+    if avg90<=0 or avg180<=0:return True
+    # Si la media de 90 dias es muy diferente a la de 180 dias es inflado
+    diferencia=abs(avg90-avg180)/avg180*100
+    if diferencia>50:return True
+    # Si el precio actual es mayor que la media es inflado
+    if current>=avg90:return True
+    return False
 
-def analizar(asin):
+def es_reciente(deal):
+    # Solo chollos de las ultimas 24 horas
+    delta_time=deal.get("deltaTime",0)
+    if not delta_time:return False
+    horas=delta_time/3600000
+    return horas<=24
+
+def tiene_historial(deal):
+    # Minimo 90 dias de historial
+    avg90=deal.get("avg90",0)
+    return avg90 and avg90>0
+
+def buen_rango_ventas(deal):
+    # Que tenga rango de ventas razonable (que se venda)
+    rank=deal.get("salesRank",0)
+    if not rank or rank<=0:return False
+    return rank<=500000
+
+def procesar(deal):
     global alertas
-    if asin in vistos:return
-    vistos.add(asin)
-    prod=consultar_producto(asin)
-    if not prod:return
-    stats=prod.get("stats",{})
-    pa=stats.get("current",[None]*3)
-    pb=stats.get("avg",[None]*3)
-    if not pa or not pb:return
-    pa=pa[0];pb=pb[0]
-    if not pa or not pb or pa<=0 or pb<=0:return
-    precio_ahora=pa/100
-    precio_antes=pb/100
-    if precio_ahora<PRECIO_MIN:return
-    bajada=(1-pa/pb)*100
-    if bajada<DESCUENTO_MIN:return
-    alertas+=1
-    titulo=str(prod.get("title","?"))[:60]
-    url="https://www.amazon.es/dp/"+asin
-    m=f"🚨 CHOLLO\n{titulo}\nAhora: {round(precio_ahora,2)}€\nAntes: {round(precio_antes,2)}€\nBajada: -{round(bajada)}%\n{url}"
-    log(m)
-    tg(m)
+    try:
+        asin=deal.get("asin","")
+        if not asin or asin in vistos:return
+        vistos.add(asin)
 
-log("CAZADOR V5 INICIADO")
-tg("🚀 Cazador iniciado")
+        # Filtro anti-inflado
+        if precio_inflado(deal):
+            log(f"Precio inflado descartado: {asin}")
+            return
+
+        # Filtro reciente
+        if not es_reciente(deal):
+            log(f"No reciente descartado: {asin}")
+            return
+
+        # Filtro historial
+        if not tiene_historial(deal):
+            log(f"Sin historial descartado: {asin}")
+            return
+
+        # Filtro rango ventas
+        if not buen_rango_ventas(deal):
+            log(f"Mal rango ventas descartado: {asin}")
+            return
+
+        titulo=str(deal.get("title","?"))[:60]
+        pa=deal.get("current",0)
+        pb=deal.get("avg90",0)
+        if not pa or not pb or pa<=0 or pb<=0:return
+        precio_ahora=pa/100
+        precio_antes=pb/100
+        bajada=round((1-pa/pb)*100)
+        if bajada<70:return
+
+        reseñas=deal.get("totalReviews",0)
+        if not reseñas or reseñas<10:
+            log(f"Pocas reseñas descartado: {asin}")
+            return
+
+        rank=deal.get("salesRank",0)
+        alertas+=1
+        url="https://www.amazon.es/dp/"+asin
+        m=(f"🚨 CHOLLO REAL -{bajada}%\n"
+           f"📦 {titulo}\n"
+           f"💰 Ahora: {round(precio_ahora,2)}€\n"
+           f"📊 Antes: {round(precio_antes,2)}€\n"
+           f"⭐ Reseñas: {reseñas}\n"
+           f"📈 Ranking: {rank}\n"
+           f"🔗 {url}")
+        log(m)
+        tg(m)
+    except Exception as e:
+        log(f"Error procesando: {e}")
+
+log("CAZADOR V5 INICIADO - MODO ANTI-INFLADO")
+tg("🚀 Cazador iniciado - Chollos reales 70%+")
 
 ciclo=0
 while True:
@@ -87,19 +149,20 @@ while True:
         ciclo+=1
         tk=tokens()
         log(f"=== CICLO {ciclo} | Tokens: {tk} | Alertas: {alertas} ===")
-        if tk<50:
-            log("Pocos tokens, esperando 3 minutos...")
+        if tk<10:
+            log("Pocos tokens, esperando 3 min...")
             time.sleep(180)
             continue
-        asins=buscar_productos()
-        log(f"Productos encontrados: {len(asins)}")
-        for asin in asins:
-            if tokens()<20:
-                log("Tokens bajos, parando ciclo")
-                break
-            analizar(asin)
-            time.sleep(1)
-        log(f"Ciclo {ciclo} completado. Esperando {INTERVALO}s...")
+        deals=buscar_deals()
+        nuevos=0
+        for deal in deals:
+            asin=deal.get("asin","")
+            if asin not in vistos:
+                nuevos+=1
+                procesar(deal)
+                time.sleep(0.3)
+        log(f"Nuevos esta ronda: {nuevos}")
+        log(f"Esperando {INTERVALO}s...")
         time.sleep(INTERVALO)
     except KeyboardInterrupt:
         log("Detenido")
